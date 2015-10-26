@@ -1,13 +1,14 @@
 package nl.tudelft.ewi.javax;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.googlecode.gentyref.GenericTypeReflector;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -53,37 +54,52 @@ public class POJOInitializer {
 		}
 
 		Object instance = null;
-		Class<?> clasz = (Class<?>) (type instanceof ParameterizedType ? ((ParameterizedType) type).getRawType() : type);
 
-		try {
-			if(Enum.class.isAssignableFrom(clasz)) {
-				Enum<?>[] enumConstants = ((Class<? extends Enum<?>>) clasz).getEnumConstants();
-				instance = enumConstants != null && enumConstants.length > 0 ? enumConstants[0] : null;
-			}
-			else if(Collection.class.isAssignableFrom(clasz)) {
-				instance = createCollection(type);
-			}
-			else if (Map.class.isAssignableFrom(clasz)) {
-				instance = createMap(type);
-			}
-			else if(FLOATY.contains(clasz)) {
-				instance =  Math.random() * 100;
-			}
-			else if (INTY.contains(clasz)) {
-				instance = 1;
-			}
-			else if (String.class.equals(clasz)) {
-				instance = "lupa";
-			}
-			else if (!Modifier.isAbstract(clasz.getModifiers())){
-				instance = createPOJO(clasz);
-			}
-			else {
-				instance = createAbstractPOJO(clasz);
-			}
+		Class<?> clasz;
+		if(type instanceof ParameterizedType) {
+			clasz = (Class<?>) ((ParameterizedType) type).getRawType();
 		}
-		catch (Throwable t) {
-			t.printStackTrace();
+		else if (type instanceof Class) {
+			clasz = (Class<?>) type;
+		}
+		else if (type instanceof TypeVariable) {
+			return null;
+		}
+		else {
+			clasz = (Class<?>) type;
+		}
+
+		if(!clasz.equals(Object.class)) {
+			try {
+				if(Enum.class.isAssignableFrom(clasz)) {
+					Enum<?>[] enumConstants = ((Class<? extends Enum<?>>) clasz).getEnumConstants();
+					instance = enumConstants != null && enumConstants.length > 0 ? enumConstants[0] : null;
+				}
+				else if(Collection.class.isAssignableFrom(clasz)) {
+					instance = createCollection(type);
+				}
+				else if (Map.class.isAssignableFrom(clasz)) {
+					instance = createMap(type);
+				}
+				else if(FLOATY.contains(clasz)) {
+					instance =  Math.random() * 100;
+				}
+				else if (INTY.contains(clasz)) {
+					instance = 1;
+				}
+				else if (String.class.equals(clasz)) {
+					instance = "lupa";
+				}
+				else if (!Modifier.isAbstract(clasz.getModifiers())){
+					instance = createPOJO(clasz);
+				}
+				else {
+					instance = createAbstractPOJO(clasz);
+				}
+			}
+			catch (Throwable t) {
+				t.printStackTrace();
+			}
 		}
 
 		instances.put(type, instance);
@@ -92,19 +108,19 @@ public class POJOInitializer {
 
 	@SuppressWarnings("unchecked")
 	private Object createMap(java.lang.reflect.Type type) throws IllegalAccessException, InstantiationException, NoSuchFieldException {
-		System.out.println("POJOInitializer#createMap");
 		Map map = new HashMap();
 		if(type instanceof ParameterizedType) {
 			ParameterizedType parameterizedType = (ParameterizedType) type;
 			java.lang.reflect.Type[] typeArguments = parameterizedType.getActualTypeArguments();
-			map.put(initializeTestData(typeArguments[0]), initializeTestData(typeArguments[1]));
+			if(!typeArguments[0].equals(Object.class) && !typeArguments[1].equals(Object.class)) {
+				map.put(initializeTestData(typeArguments[0]), initializeTestData(typeArguments[1]));
+			}
 		}
 		return map;
 	}
 
 	@SuppressWarnings("unchecked")
 	private Object createCollection(java.lang.reflect.Type type) throws IllegalAccessException, InstantiationException, NoSuchFieldException {
-		System.out.println("POJOInitializer#createCollection");
 		Collection collection;
 		if (type instanceof ParameterizedType) {
 			ParameterizedType parameterizedType = (ParameterizedType) type;
@@ -124,43 +140,41 @@ public class POJOInitializer {
 	private final Stack<Class<?>> seenSubTypes = new Stack<>();
 
 	private Object createAbstractPOJO(Class<?> clasz) throws IllegalAccessException, InstantiationException, NoSuchFieldException {
-
-		System.out.println("POJOInitializer#createAbstractPOJO");
-		// Ignore equal classes to prevent infite looping in recursive strategies:
-		// Feature -> Feature -> Feature -> ...  => Feature -> Polygon
-		seenSubTypes.push(clasz);
-
 		Object instance = null;
 		for(Class<?> annotatedClasz = clasz; annotatedClasz != null && !annotatedClasz.equals(Object.class); annotatedClasz = clasz.getSuperclass()) {
 			JsonSubTypes jsonSubTypes = annotatedClasz.getAnnotation(JsonSubTypes.class);
 			if(jsonSubTypes != null) {
 				for(JsonSubTypes.Type jsonSubType : jsonSubTypes.value()) {
 					Class<?> jsonSubTypeClass = jsonSubType.value();
-					if(!seenSubTypes.contains(clasz) && clasz.isAssignableFrom(jsonSubTypeClass)) {
-						instance = createPOJO(clasz);
-						break;
+					if(!seenSubTypes.contains(jsonSubTypeClass)) {
+						if (clasz.isAssignableFrom(jsonSubTypeClass)) {
+							// Ignore equal classes to prevent infite looping in recursive strategies:
+							// Feature -> Feature -> Feature -> ...  => Feature -> Polygon
+							seenSubTypes.push(jsonSubTypeClass);
+							instance = createPOJO(jsonSubTypeClass);
+							seenSubTypes.pop();
+							break;
+						}
 					}
 				}
 			}
 		}
 
-		seenSubTypes.pop();
 		return instance;
 	}
 
-	private Object createPOJO(Class<?> clasz) throws IllegalAccessException, InstantiationException {
-		System.out.println("POJOInitializer#createPOJO");
+	private Object createPOJO(final Class<?> clasz) throws IllegalAccessException, InstantiationException {
 		Object instance = clasz.newInstance();
 		instances.put(clasz, instance); // Prevent creating dupes...
-		for(; clasz != null && !clasz.equals(Object.class); clasz = clasz.getSuperclass()) {
-			for(Field field : clasz.getDeclaredFields()) {
-				if (field.isAnnotationPresent(JsonIgnoreProperties.class) ||
-					field.isAnnotationPresent(JsonIgnore.class)) {
+		for(Class<?> finger = clasz; finger != null && !finger.equals(Object.class); finger = finger.getSuperclass()) {
+			for(Field field : finger.getDeclaredFields()) {
+				if (field.isAnnotationPresent(JsonIgnore.class)) {
 					continue;
 				}
 				try {
 					field.setAccessible(true);
-					field.set(instance, initializeTestData(field.getGenericType()));
+					Type type = GenericTypeReflector.getExactFieldType(field, clasz);
+					field.set(instance, initializeTestData(type));
 				}
 				catch (Exception e) {
 					// Swallow exceptions here...

@@ -3,6 +3,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import nl.tudelft.ewi.javax.JAXRSTaglet;
 import org.jboss.resteasy.spi.metadata.ResourceMethod;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -22,6 +23,7 @@ public class TestTheThing {
 	}
 
 	@Test
+	@Ignore
 	public void testRegistration() {
 		Map map = Mockito.mock(Map.class);
 		JAXRSTaglet.register(map);
@@ -29,6 +31,7 @@ public class TestTheThing {
 	}
 
 	@Test
+	@Ignore
 	public void test() throws NoSuchMethodException, JsonProcessingException, NoSuchFieldException, InstantiationException, IllegalAccessException {
 		for(Method method : UsersAPI.class.getDeclaredMethods()) {
 			JAXRSTaglet.scanResourceClasses(method);

@@ -42,39 +42,13 @@ public interface UsersAPI {
 	@POST
 	User createUser(User user);
 
-	/**
-	 * Get an user by id.
-	 * @param id Id to look for.
-	 * @return The user.
-	 * @throws javax.ws.rs.NotFoundException If the user could not be found.
-	 * @api
-	 */
-	@GET
-	@Path("{userId}")
-	@Consumes(MediaType.APPLICATION_JSON)
-	User getUserById(@PathParam("userId") Integer id) throws NotFoundException;
 
 	/**
-	 * Update an user.
-	 * @param id Id of the user.
-	 * @param user The updated user information.
-	 * @return The persisted user information.
-	 * @throws javax.ws.rs.NotFoundException If the user could not be found.
-	 * @api
+	 * Get a {@code UserAPI} to interact with a user.
+	 * @param id
+	 * @return the UserAPI.
 	 */
-	@PUT
 	@Path("{userId}")
-	@Consumes(MediaType.APPLICATION_JSON)
-	User updateUser(@PathParam("userId") int id, User user);
-
-	/**
-	 * Delete an user.
-	 * @param id Id of the user.
-	 * @throws javax.ws.rs.NotFoundException If the user could not be found.
-	 * @api
-	 */
-	@DELETE
-	@Path("{userId}")
-	void deleteUser(@PathParam("userId") Integer id);
+	UserAPI getUser(@PathParam("userId") Integer id);
 
 }

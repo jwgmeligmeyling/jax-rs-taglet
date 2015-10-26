@@ -52,18 +52,16 @@ public class JAXRSTaglet implements Taglet {
 		if (tagletMap.containsKey(NAME)) {
 			tagletMap.remove(NAME);
 		}
-		tagletMap.put(NAME, tag);//new com.sun.tools.doclets.internal.toolkit.taglets.LegacyTaglet(tag));
+		tagletMap.put(NAME, tag);
 	}
 
 	public static void scanResourceClasses(Method method) {
-		System.out.println("JAXRSTaglet#scanResourceClasses");
 		new Reflections(method.getDeclaringClass().getPackage().getName())
 			.getTypesAnnotatedWith(Path.class)
 			.forEach(JAXRSTaglet::getResoureClass);
 	}
 
 	private static ResourceClass getResoureClass(Class<?> clasz) {
-		System.out.println("JAXRSTaglet#getResoureClass");
 		ResourceClass resourceClass = RESOURCES.get(clasz);
 		if(resourceClass == null) {
 			resourceClass = ResourceBuilder.rootResourceFromAnnotations(clasz);
@@ -73,7 +71,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static ResourceMethod getResourceMethod(ResourceClass resourceClass, Method method) {
-		System.out.println("JAXRSTaglet#getResourceMethod");
 		for(ResourceMethod resourceMethod : resourceClass.getResourceMethods()) {
 			if(resourceMethod.getAnnotatedMethod().equals(method)) {
 				return resourceMethod;
@@ -81,7 +78,7 @@ public class JAXRSTaglet implements Taglet {
 		}
 		for(ResourceLocator locator : resourceClass.getResourceLocators()) {
 			ResourceMethod resourceMethod = getResourceMethod(
-				ResourceBuilder.rootResourceFromAnnotations(locator.getReturnType()),
+				getResoureClass(locator.getReturnType()),
 				method
 			);
 			if(resourceMethod != null) return resourceMethod;
@@ -90,7 +87,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static ResourceMethod getResourceMethod(Method method) {
-		System.out.println("JAXRSTaglet#getResourceMethod");
 		ResourceMethod resourceMethod = null;
 		for(ResourceClass resourceClass : RESOURCES.values()) {
 			resourceMethod = getResourceMethod(resourceClass, method);
@@ -100,7 +96,10 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static void getFullPaths(ResourceMethod a, ResourceClass resourceClass, String basePath, Consumer<String> consumer) {
-		System.out.println("JAXRSTaglet#getFullPaths");
+		if(!resourceClass.getClazz().isAnnotationPresent(Path.class) && basePath.isEmpty()) {
+			// Skip base cases without Path annotations
+			return;
+		}
 		for(ResourceMethod resourceMethod : resourceClass.getResourceMethods()) {
 			if(resourceMethod.equals(a)) {
 				consumer.accept(basePath + resourceMethod.getFullpath());
@@ -109,7 +108,7 @@ public class JAXRSTaglet implements Taglet {
 		for(ResourceLocator locator : resourceClass.getResourceLocators()) {
 			getFullPaths(
 				a,
-				ResourceBuilder.rootResourceFromAnnotations(locator.getReturnType()),
+				getResoureClass(locator.getReturnType()),
 				basePath + locator.getFullpath(),
 				consumer
 			);
@@ -117,7 +116,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static List<String> getFullPaths(ResourceMethod resourceMethod) {
-		System.out.println("JAXRSTaglet#getFullPaths");
 		List<String> paths = new ArrayList<>();
 		for(ResourceClass resourceClass : RESOURCES.values()) {
 			getFullPaths(resourceMethod, resourceClass, "", paths::add);
@@ -130,7 +128,6 @@ public class JAXRSTaglet implements Taglet {
 	).stream().collect(Collectors.toMap(Class::getName, Function.identity()));
 
 	private static Class<?> getClassFor(Type type) {
-		System.out.println("JAXRSTaglet#getClassFor");
 		if(type.isPrimitive()) {
 			return PRIMITIES.get(type.typeName());
 		}
@@ -147,7 +144,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static String fixQualifiedClassName(String typeName) {
-		System.out.println("JAXRSTaglet#fixQualifiedClassName");
 		String[] parts = typeName.split("\\.");
 
 		String qualifiedTypeName = "";
@@ -161,7 +157,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static Method getMethodFor(MethodDoc methodDoc) throws NoSuchMethodException {
-		System.out.println("JAXRSTaglet#getMethodFor");
 		Class<?>[] paramTypes = Stream.of(methodDoc.parameters())
 			.map(Parameter::type)
 			.map(JAXRSTaglet::getClassFor)
@@ -171,7 +166,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static String writeTestData(Object object) throws JsonProcessingException {
-		System.out.println("JAXRSTaglet#writeTestData");
 		return OBJECT_MAPPER.writerWithDefaultPrettyPrinter()
 			.withoutFeatures(SerializationFeature.FAIL_ON_EMPTY_BEANS)
 			.writeValueAsString(object);
@@ -179,7 +173,6 @@ public class JAXRSTaglet implements Taglet {
 
 
 	public String doMagic(ResourceMethod method) throws InstantiationException, IllegalAccessException, JsonProcessingException, NoSuchFieldException {
-		System.out.println("JAXRSTaglet#doMagic");
 		StringBuilder stringBuilder = new StringBuilder();
 		writeExampleRequest(method, stringBuilder);
 		writeExampleResponse(method, stringBuilder);
@@ -187,18 +180,18 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private void writeExampleRequest(ResourceMethod method, StringBuilder stringBuilder) throws IllegalAccessException, InstantiationException, NoSuchFieldException, JsonProcessingException {
-		System.out.println("JAXRSTaglet#writeExampleRequest");
+		stringBuilder.append("<dt>Example request:</dt>\n");
+		stringBuilder.append("<dd><code><pre>\n");
+
+		for(String fullPath : getFullPaths(method)) {
+			for(String httpMethod : method.getHttpMethods()) {
+				stringBuilder.append(httpMethod).append(" ").append(fullPath).append("\n");
+			}
+		}
+
 		for(MethodParameter param : method.getParams()) {
 			if(!param.getParamType().equals(ParamType.MESSAGE_BODY)) {
 				continue;
-			}
-			stringBuilder.append("<dt>Example request:</dt>\n");
-			stringBuilder.append("<dd><code><pre>\n");
-
-			for(String fullPath : getFullPaths(method)) {
-				for(String httpMethod : method.getHttpMethods()) {
-					stringBuilder.append(httpMethod).append(" ").append(fullPath).append("\n");
-				}
 			}
 
 			stringBuilder.append("\n");
@@ -208,7 +201,6 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private void writeExampleResponse(ResourceMethod method, StringBuilder stringBuilder) throws JsonProcessingException, IllegalAccessException, InstantiationException, NoSuchFieldException {
-		System.out.println("JAXRSTaglet#writeExampleResponse");
 		java.lang.reflect.Type returnType = method.getGenericReturnType();
 		Class<?> rawReturnType = method.getReturnType();
 		if(!Void.TYPE.equals(rawReturnType) && !Response.class.equals(rawReturnType)) {
