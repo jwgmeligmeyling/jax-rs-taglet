@@ -12,6 +12,7 @@ import java.lang.reflect.TypeVariable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -34,8 +35,6 @@ import java.util.Stack;
 public class POJOInitializer {
 
 	private static final List<Class<?>> FLOATY = Arrays.asList(new Class<?>[]{float.class, double.class, Float.class, Double.class});
-	private static final  List<Class<?>> INTY = Arrays.asList(new Class<?>[] { int.class, short.class, byte.class, long.class,
-		Integer.class, Short.class, Byte.class, Long.class });
 
 	private final Map<Type, Object> instances = new HashMap<>();
 
@@ -48,13 +47,8 @@ public class POJOInitializer {
 	 * @throws NoSuchFieldException
 	 */
 	public Object initializeTestData(Type type) throws IllegalAccessException, InstantiationException, NoSuchFieldException {
-		System.out.println("POJOInitializer#initializeTestData");
-		if(instances.containsKey(type)) {
-			return instances.get(type);
-		}
-
+		System.out.println("POJOInitializer#initializeTestData " + type);
 		Object instance = null;
-
 		Class<?> clasz;
 		if(type instanceof ParameterizedType) {
 			clasz = (Class<?>) ((ParameterizedType) type).getRawType();
@@ -81,20 +75,29 @@ public class POJOInitializer {
 				else if (Map.class.isAssignableFrom(clasz)) {
 					instance = createMap(type);
 				}
-				else if(FLOATY.contains(clasz)) {
-					instance =  Math.random() * 100;
-				}
-				else if (INTY.contains(clasz)) {
-					instance = 1;
-				}
+				else if(float.class.equals(clasz) || Float.class.equals(clasz)) { instance =  (float) (Math.random() * 100); }
+				else if(double.class.equals(clasz) || Double.class.equals(clasz)) { instance =  (Math.random() * 100); }
+				else if (int.class.equals(clasz) || Integer.class.equals(clasz)) { instance = 1; }
+				else if (byte.class.equals(clasz) || Byte.class.equals(clasz)) { instance = (byte) 1; }
+				else if (short.class.equals(clasz) || Short.class.equals(clasz)) { instance = (short) 1; }
+				else if (long.class.equals(clasz) || Long.class.equals(clasz)) { instance = 1l; }
+				else if (Date.class.equals(clasz)) { return new Date(); }
 				else if (String.class.equals(clasz)) {
 					instance = "lupa";
 				}
-				else if (!Modifier.isAbstract(clasz.getModifiers())){
-					instance = createPOJO(clasz);
-				}
 				else {
-					instance = createAbstractPOJO(clasz);
+					if(instances.containsKey(type)) {
+						return instances.get(type);
+					}
+					else if(clasz.getName().startsWith("java")) {
+						instance = null;
+					}
+					else if (!Modifier.isAbstract(clasz.getModifiers())){
+						instance = createPOJO(clasz);
+					}
+					else {
+						instance = createAbstractPOJO(clasz);
+					}
 				}
 			}
 			catch (Throwable t) {
@@ -141,7 +144,7 @@ public class POJOInitializer {
 
 	private Object createAbstractPOJO(Class<?> clasz) throws IllegalAccessException, InstantiationException, NoSuchFieldException {
 		Object instance = null;
-		for(Class<?> annotatedClasz = clasz; annotatedClasz != null && !annotatedClasz.equals(Object.class); annotatedClasz = clasz.getSuperclass()) {
+		for(Class<?> annotatedClasz = clasz; annotatedClasz != null && !annotatedClasz.equals(Object.class); annotatedClasz = annotatedClasz.getSuperclass()) {
 			JsonSubTypes jsonSubTypes = annotatedClasz.getAnnotation(JsonSubTypes.class);
 			if(jsonSubTypes != null) {
 				for(JsonSubTypes.Type jsonSubType : jsonSubTypes.value()) {
@@ -168,7 +171,7 @@ public class POJOInitializer {
 		instances.put(clasz, instance); // Prevent creating dupes...
 		for(Class<?> finger = clasz; finger != null && !finger.equals(Object.class); finger = finger.getSuperclass()) {
 			for(Field field : finger.getDeclaredFields()) {
-				if (field.isAnnotationPresent(JsonIgnore.class)) {
+				if (Modifier.isStatic(field.getModifiers()) || field.isAnnotationPresent(JsonIgnore.class)) {
 					continue;
 				}
 				try {

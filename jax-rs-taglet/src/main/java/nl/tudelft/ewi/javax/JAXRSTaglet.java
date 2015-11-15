@@ -3,7 +3,9 @@ package nl.tudelft.ewi.javax;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
 import com.sun.javadoc.Doc;
 import com.sun.javadoc.MethodDoc;
 import com.sun.javadoc.Parameter;
@@ -22,7 +24,9 @@ import org.jboss.resteasy.spi.metadata.ResourceMethod;
 import org.reflections.Reflections;
 
 import javax.ws.rs.Path;
+import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -56,12 +60,14 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static void scanResourceClasses(Method method) {
+		System.out.println("In scanResourceClasses!");
 		new Reflections(method.getDeclaringClass().getPackage().getName())
 			.getTypesAnnotatedWith(Path.class)
 			.forEach(JAXRSTaglet::getResoureClass);
 	}
 
 	private static ResourceClass getResoureClass(Class<?> clasz) {
+		System.out.println("In getResoureClass!");
 		ResourceClass resourceClass = RESOURCES.get(clasz);
 		if(resourceClass == null) {
 			resourceClass = ResourceBuilder.rootResourceFromAnnotations(clasz);
@@ -71,6 +77,7 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static ResourceMethod getResourceMethod(ResourceClass resourceClass, Method method) {
+		System.out.println("In getResourceMethod!");
 		for(ResourceMethod resourceMethod : resourceClass.getResourceMethods()) {
 			if(resourceMethod.getAnnotatedMethod().equals(method)) {
 				return resourceMethod;
@@ -87,37 +94,42 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static ResourceMethod getResourceMethod(Method method) {
-		ResourceMethod resourceMethod = null;
-		for(ResourceClass resourceClass : RESOURCES.values()) {
-			resourceMethod = getResourceMethod(resourceClass, method);
-			if(resourceMethod != null) break;
+		System.out.println("In getResourceMethod!");
+
+		ResourceClass resourceClass = RESOURCES.get(method.getDeclaringClass());
+		if(resourceClass == null) {
+			resourceClass = getResoureClass(method.getDeclaringClass());
+			RESOURCES.put(method.getDeclaringClass(), resourceClass);
 		}
-		return resourceMethod;
+
+		return getResourceMethod(resourceClass, method);
 	}
 
 	private static void getFullPaths(ResourceMethod a, ResourceClass resourceClass, String basePath, Consumer<String> consumer) {
+		System.out.printf("GetFullPaths %s %s %s %s", a, resourceClass, basePath, consumer);
 		if(!resourceClass.getClazz().isAnnotationPresent(Path.class) && basePath.isEmpty()) {
 			// Skip base cases without Path annotations
 			return;
 		}
 		for(ResourceMethod resourceMethod : resourceClass.getResourceMethods()) {
 			if(resourceMethod.equals(a)) {
-				consumer.accept(basePath + resourceMethod.getFullpath());
+				consumer.accept(basePath  + "/" + resourceMethod.getFullpath());
 			}
 		}
 		for(ResourceLocator locator : resourceClass.getResourceLocators()) {
 			getFullPaths(
 				a,
 				getResoureClass(locator.getReturnType()),
-				basePath + locator.getFullpath(),
+				basePath + "/" + locator.getFullpath(),
 				consumer
 			);
 		}
 	}
 
 	public static List<String> getFullPaths(ResourceMethod resourceMethod) {
+		System.out.println("In getFullPaths!");
 		List<String> paths = new ArrayList<>();
-		for(ResourceClass resourceClass : RESOURCES.values()) {
+		for(ResourceClass resourceClass : Lists.newArrayList(RESOURCES.values())) {
 			getFullPaths(resourceMethod, resourceClass, "", paths::add);
 		}
 		return paths;
@@ -127,23 +139,35 @@ public class JAXRSTaglet implements Taglet {
 		byte.class, short.class, int.class, long.class, float.class, double.class
 	).stream().collect(Collectors.toMap(Class::getName, Function.identity()));
 
-	private static Class<?> getClassFor(Type type) {
+	public static Class<?> getClassFor(Type type) {
+		System.out.println("In getClassFor!");
+
+		Class<?> valueType;
 		if(type.isPrimitive()) {
-			return PRIMITIES.get(type.typeName());
+			valueType = PRIMITIES.get(type.typeName());
 		}
-		try {
-			String qualifiedTypeName = fixQualifiedClassName(type.qualifiedTypeName());
-			return Class.forName(qualifiedTypeName);
+		else {
+			try {
+				String qualifiedTypeName = fixQualifiedClassName(type.qualifiedTypeName());
+				valueType = Class.forName(qualifiedTypeName);
+			}
+			catch (RuntimeException e) {
+				throw e;
+			}
+			catch (Exception e) {
+				throw new RuntimeException(e);
+			}
 		}
-		catch (RuntimeException e) {
-			throw e;
+
+		if(!Strings.isNullOrEmpty(type.dimension())) {
+			return Array.newInstance(valueType, type.dimension().length() / 2).getClass();
 		}
-		catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+
+		return valueType;
 	}
 
 	private static String fixQualifiedClassName(String typeName) {
+		System.out.println("In fixQualifiedClassName!");
 		String[] parts = typeName.split("\\.");
 
 		String qualifiedTypeName = "";
@@ -157,6 +181,7 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	private static Method getMethodFor(MethodDoc methodDoc) throws NoSuchMethodException {
+		System.out.println("In getMethodFor!");
 		Class<?>[] paramTypes = Stream.of(methodDoc.parameters())
 			.map(Parameter::type)
 			.map(JAXRSTaglet::getClassFor)
@@ -166,44 +191,66 @@ public class JAXRSTaglet implements Taglet {
 	}
 
 	public static String writeTestData(Object object) throws JsonProcessingException {
+		System.out.println("In writeTestData!");
 		return OBJECT_MAPPER.writerWithDefaultPrettyPrinter()
 			.withoutFeatures(SerializationFeature.FAIL_ON_EMPTY_BEANS)
 			.writeValueAsString(object);
 	}
 
 
-	public String doMagic(ResourceMethod method) throws InstantiationException, IllegalAccessException, JsonProcessingException, NoSuchFieldException {
-		StringBuilder stringBuilder = new StringBuilder();
-		writeExampleRequest(method, stringBuilder);
-		writeExampleResponse(method, stringBuilder);
-		return stringBuilder.toString();
+	public String doMagic(ResourceMethod method) {
+		try {
+			System.out.println("In doMagic!");
+			StringBuilder stringBuilder = new StringBuilder();
+			writeExampleRequest(method, stringBuilder);
+			writeExampleResponse(method, stringBuilder);
+			return stringBuilder.toString();
+		}
+		catch (Exception e){
+			e.printStackTrace();
+			throw new RuntimeException(e.getMessage(), e);
+		}
 	}
 
 	private void writeExampleRequest(ResourceMethod method, StringBuilder stringBuilder) throws IllegalAccessException, InstantiationException, NoSuchFieldException, JsonProcessingException {
+
+		System.out.println("In writeExampleRequest!");
 		stringBuilder.append("<dt>Example request:</dt>\n");
 		stringBuilder.append("<dd><code><pre>\n");
 
-		for(String fullPath : getFullPaths(method)) {
-			for(String httpMethod : method.getHttpMethods()) {
+		for (String fullPath : getFullPaths(method)) {
+			for (String httpMethod : method.getHttpMethods()) {
 				stringBuilder.append(httpMethod).append(" ").append(fullPath).append("\n");
 			}
 		}
 
-		for(MethodParameter param : method.getParams()) {
-			if(!param.getParamType().equals(ParamType.MESSAGE_BODY)) {
+		for (MethodParameter param : method.getParams()) {
+			if (!param.getParamType().equals(ParamType.MESSAGE_BODY)) {
+				continue;
+			}
+			if (!Lists.newArrayList(method.getConsumes()).contains(MediaType.APPLICATION_JSON_TYPE)) {
 				continue;
 			}
 
 			stringBuilder.append("\n");
 			Object obj = POJO_INITIALIZER.initializeTestData(param.getGenericType());
-			stringBuilder.append(writeTestData(obj)).append("\n</pre></code></dd>\n");
+			stringBuilder.append(writeTestData(obj));
 		}
+
+		stringBuilder.append("\n</pre></code></dd>\n");
 	}
 
+
 	private void writeExampleResponse(ResourceMethod method, StringBuilder stringBuilder) throws JsonProcessingException, IllegalAccessException, InstantiationException, NoSuchFieldException {
+
+		System.out.println("In writeExampleResponse!");
 		java.lang.reflect.Type returnType = method.getGenericReturnType();
 		Class<?> rawReturnType = method.getReturnType();
-		if(!Void.TYPE.equals(rawReturnType) && !Response.class.equals(rawReturnType)) {
+		if (!Response.class.equals(rawReturnType) &&
+			!Void.class.equals(rawReturnType) &&
+			!void.class.equals(rawReturnType) &&
+			Lists.newArrayList(method.getProduces()).contains(MediaType.APPLICATION_JSON_TYPE)) {
+
 			stringBuilder.append("<dt>Example response:</dt>\n");
 			stringBuilder.append("<dd><code><pre>\n").append(writeTestData(POJO_INITIALIZER.initializeTestData(returnType))).append("\n</pre></code></dd>\n");
 		}
@@ -212,6 +259,7 @@ public class JAXRSTaglet implements Taglet {
 	volatile boolean initialized = false;
 
 	public synchronized String toString(Doc holder) {
+		System.out.println("In toString!");
 		if(holder.isMethod()) {
 			MethodDoc doc = (MethodDoc) holder;
 			try {
@@ -236,6 +284,7 @@ public class JAXRSTaglet implements Taglet {
 
 	@Override
 	public Content getTagletOutput(Tag var1, TagletWriter var2) throws IllegalArgumentException {
+		System.out.println("In getTagletOutput!");
 		Content var3 = var2.getOutputInstance();
 		var3.addContent(new RawHtml(toString(var1.holder())));
 		return var3;
@@ -243,6 +292,7 @@ public class JAXRSTaglet implements Taglet {
 
 	@Override
 	public Content getTagletOutput(Doc var1, TagletWriter var2) throws IllegalArgumentException {
+		System.out.println("In getTagletOutput!");
 		Content var3 = var2.getOutputInstance();
 		Tag[] var4 = var1.tags(this.getName());
 		Stream.of(var4).map(Tag::holder)
